@@ -16,14 +16,21 @@
 
 package org.jsonschema2pojo;
 
-import static org.apache.commons.lang3.StringUtils.*;
+import static org.apache.commons.lang3.StringUtils.stripEnd;
+import static org.apache.commons.lang3.StringUtils.substringAfter;
+import static org.apache.commons.lang3.StringUtils.substringBefore;
 
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class SchemaStore {
 
@@ -46,7 +53,19 @@ public class SchemaStore {
         if (!schemas.containsKey(id)) {
 
             JsonNode content = contentResolver.resolve(removeFragment(id));
-
+        	if(content.get("allof") != null) {
+        		ArrayNode allofArray = (ArrayNode) content.get("allof");
+        		String allofContent = allofArray.get(0).toString();
+        		ObjectNode propertiesContent = (ObjectNode) allofArray.get(1);
+            	try {
+	            	ObjectNode extendsNode = (ObjectNode)OBJECT_MAPPER.readTree("{\"extends\":"+allofContent+"}");
+	            	((ObjectNode)content).remove("allof");
+	            	((ObjectNode)content).set("extends", extendsNode.get("extends"));
+	            	((ObjectNode)content).set("properties", propertiesContent.get("properties"));
+            	} catch (Exception exception) {
+            		throw new RuntimeException(exception);
+            	}
+            }
             if (id.toString().contains("#")) {
                 JsonNode childContent = fragmentResolver.resolve(content, '#' + id.getFragment());
                 schemas.put(id, new Schema(id, childContent, content));
@@ -107,7 +126,6 @@ public class SchemaStore {
                 throw new IllegalArgumentException("Bad path: " + stringId);
             }
         }
-
         if (selfReferenceWithoutParentFile(parent, path) || substringBefore(stringId, "#").isEmpty()) {
             schemas.put(id, new Schema(id, fragmentResolver.resolve(parent.getParentContent(), path), parent.getParentContent()));
             return schemas.get(id);
@@ -124,5 +142,9 @@ public class SchemaStore {
     public synchronized void clearCache() {
         schemas.clear();
     }
+    
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
+            .enable(JsonParser.Feature.ALLOW_COMMENTS)
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
 
 }
